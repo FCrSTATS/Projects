@@ -1,0 +1,1281 @@
+Find a Youngester to Replace Marek Hamšík
+================
+
+``` r
+## Load the Player Data 
+options(warn=-1)
+df <- read.csv("CompleteDataset.csv", stringsAsFactors = F)
+```
+
+Marek Hamšík is a key part of the Napoli team who delights twitter via 15-25 second long GIFs of amazing technical execution in fast-paced transitions. Yet in July Marek will be 31 and may only have 1-2 seasons more of top quality football. Let's find a replacement that can take over and play for many years in Naples.
+
+#### The Remit
+
+1.  A central midfielder
+2.  Aged between 17-21 years old
+3.  A similar skillset to Marek Hamšík
+4.  Ideally a little undiscovered with room for growth and improvement
+
+#### The Data
+
+In a perfect world we have a well oiled SQL database stacked with processed OPTA data at our finger tips. In this world we have [FIFA 18 data](https://www.kaggle.com/thec03u5/fifa-18-demo-player-dataset/data), but this 'real fake' data can help us understand some concepts and see some code in action. The dataset includes:
+
+-   Player personal attributes (Nationality, Club, Photo, Age, Value etc.)
+-   Player performance attributes (Overall, Potential, Aggression, Agility etc.)
+-   Player preferred position and ratings at all positions.
+
+#### The Plan
+
+1.  Basic Filtering Using positon and age we can do some basic filtering to reduce the amount of options available to us.
+
+2.  Age Curves We want to find the closet matching player to Marek Hamšík, yet with time to grow, we therefore want to try and identify age curves for each attribute. This would allow us to estimate that if a player has a shooting rating of 75 at 18 years old on average he should have a shooting rating of 75+n at 26 years old. We will use these age curves to develop a 'Future Version' of each player in the dataset.
+
+3.  Nearest Neighbour Analysis Nearest Neighbour Analysis will allow us to calculate the Future Versions of players that are most similar in attributes to Marek Hamšík, we will use the results to determine a Top 25 shortlist that we will provide to our Head of Recruitment, Joseph Allaire.
+
+Additionally we will run the analysis again but only with the attributes associated with the midfielder role.
+
+Data Setup
+----------
+
+A few things need to be done to get the dataset ready for use
+
+``` r
+## Convert some columns from factors to numerics
+cols.num <- c(colnames(df[14:47]))
+df[cols.num] <- sapply(df[cols.num],as.numeric)
+
+## Create a Row for Hamsik 
+Hamsik <- df[which(df$Name == "M. Hamšík"),]
+Hamsik <- Hamsik[c(2:3,9,11,12,7:8,13:47)]
+
+## Define a variable of Hamsik current age for later use 
+FutureAge <- as.numeric(Hamsik$Age)
+
+## load some packages
+require(dplyr); require(ggplot2)
+```
+
+    ## Loading required package: dplyr
+
+    ## 
+    ## Attaching package: 'dplyr'
+
+    ## The following objects are masked from 'package:stats':
+    ## 
+    ##     filter, lag
+
+    ## The following objects are masked from 'package:base':
+    ## 
+    ##     intersect, setdiff, setequal, union
+
+    ## Loading required package: ggplot2
+
+``` r
+## Creaet a Subset of Potential Candidates for later use 
+#MarekPositions <- c("CM", "CAM", "CDM")
+Candidates <- df[which(grepl("CM", df$Preferred.Positions)),]
+Candidates2 <- df[which(grepl("CAM", df$Preferred.Positions)),]
+Candidates3 <- df[which(grepl("CDM", df$Preferred.Positions)),]
+
+## join the dataframes above and reduce
+Candidates <- rbind(Candidates, Candidates2)
+Candidates <- rbind(Candidates, Candidates3)
+Candidates <- unique(Candidates)
+
+## filter for age 
+Candidates <- Candidates[which(Candidates$Age >= 15),]
+Candidates <- Candidates[which(Candidates$Age <= 21),]
+Candidates <- Candidates[c(2:3,9,11,12,7:8,13:47)]
+
+## Create a list of Player Attributes
+PlayerAttributes <- colnames(df[c(7:8,13:47)])
+```
+
+Age Curves
+----------
+
+There is a bit of work to do to calculate the age curve modifiers per age for each attributes. The annotations should help explain the code below.
+
+``` r
+## Calculate the range for the stat_smooth 80 values 
+StatSmoothConvert <- seq(from = min(df$Age), to = max(df$Age), length.out = 80)
+
+## create a dataframe to catch all the calculations in
+modiferResults <- data.frame(AgeStatic = numeric(), mean = numeric(), Modifier = numeric(), Attribute = character(), stringsAsFactors = F)
+
+
+## Loop through each attribute and calculate the stat_smooth of the plots and the the modifer values
+for (i in 1:length(PlayerAttributes)) {
+        
+      C <- PlayerAttributes[i] # select a row
+      p <- qplot(Age,df[C],data=df) + stat_smooth() # plot the data
+      StatFit <- ggplot_build(p)$data[[2]] # grab the plotting data
+      
+      ## create an empty dataframe to catch the results
+      StatRef <- data.frame(AgeBreak = StatSmoothConvert, StatFit = StatFit$y, AgeStatic = round(StatSmoothConvert,0), stringsAsFactors = F)
+      
+      ## create a summary of the means per age
+      StatAVG <- StatRef %>% group_by(AgeStatic) %>% dplyr::summarize(Mean = mean(StatFit, na.rm=TRUE))
+      
+      
+      ModValues <- StatAVG[which(StatAVG$AgeStatic == FutureAge),] # select the age of Hamsik to compare
+      ModValue <- ModValues$Mean # calculate the mean 
+      StatAVG$Modifier <-  ModValue / StatAVG$Mean  # calculate the modifier for the age
+      StatAVG$Attribute <- C # name the attribute
+      StatAVG <- as.data.frame(StatAVG) # turn it to a dataframe
+      modiferResults <- rbind(modiferResults, StatAVG) #bind the result to the modifierResults dataframe 
+      cat(".") # print a '.' to keep up with progress
+
+}
+```
+
+    ## .....................................
+
+Future Versions
+---------------
+
+Now we have the modifier effects for all ages and attributes. Now lets create a loop that iterate through all of our candidates and create future versions of themselves.
+
+``` r
+for (n in 1:nrow(Candidates)) {
+  
+player2calc <- Candidates[n,]
+futureVersion <- player2calc
+
+  for (i in PlayerAttributes){
+      
+  XXX <- modiferResults %>% filter(AgeStatic == player2calc$Age & Attribute == i)  
+  futureVersion[1,i] <- futureVersion[i] * XXX$Modifier
+      
+  }
+
+  if(n == 1){
+  ComparisonResults <- futureVersion
+  }else{
+      
+  ComparisonResults <- rbind(ComparisonResults, futureVersion)
+  }
+}
+```
+
+Nearest Neighbours : Top 25
+---------------------------
+
+We use the nn2() function from the RANN package to calculate the nearest neighbours. We need to past the function the query data (Hamsik) and the test data (the candidates).
+
+The function will pass back a similarity score for us to utlise. See annotations below:
+
+``` r
+require(RANN); require(formattable)
+
+# remove incompelte rows
+ComparisonResults <- ComparisonResults[complete.cases(ComparisonResults), ]
+
+## create new dataframes with just the columns of data we will test
+ComparisonData <- ComparisonResults[6:42]
+Hammer <- Hamsik[6:42]
+
+## reset the indexes of the df
+rownames(ComparisonData) <- NULL
+
+## Run the nn2 analysis 
+nnResults <- nn2(ComparisonData, Hammer, k=min(25,nrow(data)),treetype=c("kd","bd"),
+    searchtype=c("standard","priority","radius"),radius=0.0,eps=0.0)
+
+## Convert the results to arrays to use
+PlayerSelection <- unlist(t(nnResults$nn.idx))[,1]
+CloseMatch <- 100 - unlist(t(nnResults$nn.dists))[,1] # take away the distance from 100 to get a similarity score... the higher the better. 
+
+## Create summary data of the Top 25
+FinalResults <- ComparisonResults[PlayerSelection,]
+FinalResults <- FinalResults[1:4] # trim unneeded columns
+FinalResults$SimilarityScore <- CloseMatch # Add the similarity score 
+formattable(FinalResults) # display 
+```
+
+<table class="table table-condensed">
+<thead>
+<tr>
+<th style="text-align:left;">
+</th>
+<th style="text-align:right;">
+Name
+</th>
+<th style="text-align:right;">
+Age
+</th>
+<th style="text-align:right;">
+Club
+</th>
+<th style="text-align:right;">
+Value
+</th>
+<th style="text-align:right;">
+SimilarityScore
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+1257
+</td>
+<td style="text-align:right;">
+J. Jankto
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Udinese
+</td>
+<td style="text-align:right;">
+€12M
+</td>
+<td style="text-align:right;">
+50.47555
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1934
+</td>
+<td style="text-align:right;">
+V. Vada
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Girondins de Bordeaux
+</td>
+<td style="text-align:right;">
+€9.5M
+</td>
+<td style="text-align:right;">
+49.51161
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+954
+</td>
+<td style="text-align:right;">
+N. Amiri
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+TSG 1899 Hoffenheim
+</td>
+<td style="text-align:right;">
+€13M
+</td>
+<td style="text-align:right;">
+48.26804
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+4736
+</td>
+<td style="text-align:right;">
+C. Nkunku
+</td>
+<td style="text-align:right;">
+19
+</td>
+<td style="text-align:right;">
+Paris Saint-Germain
+</td>
+<td style="text-align:right;">
+€3.9M
+</td>
+<td style="text-align:right;">
+44.85950
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2934
+</td>
+<td style="text-align:right;">
+S. Schrijvers
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+KRC Genk
+</td>
+<td style="text-align:right;">
+€6M
+</td>
+<td style="text-align:right;">
+43.80611
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1414
+</td>
+<td style="text-align:right;">
+A. Golovin
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+CSKA Moscow
+</td>
+<td style="text-align:right;">
+€11.5M
+</td>
+<td style="text-align:right;">
+43.45281
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1452
+</td>
+<td style="text-align:right;">
+M. Stendera
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Eintracht Frankfurt
+</td>
+<td style="text-align:right;">
+€12M
+</td>
+<td style="text-align:right;">
+42.20064
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+5407
+</td>
+<td style="text-align:right;">
+S. Lukić
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+Levante UD
+</td>
+<td style="text-align:right;">
+€2.4M
+</td>
+<td style="text-align:right;">
+41.83952
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+3937
+</td>
+<td style="text-align:right;">
+O. Zinchenko
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+Manchester City
+</td>
+<td style="text-align:right;">
+€5M
+</td>
+<td style="text-align:right;">
+39.65673
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2522
+</td>
+<td style="text-align:right;">
+Y. Yazıcı
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+Trabzonspor
+</td>
+<td style="text-align:right;">
+€8.5M
+</td>
+<td style="text-align:right;">
+38.17919
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2103
+</td>
+<td style="text-align:right;">
+M. Lopez
+</td>
+<td style="text-align:right;">
+19
+</td>
+<td style="text-align:right;">
+Olympique de Marseille
+</td>
+<td style="text-align:right;">
+€8.5M
+</td>
+<td style="text-align:right;">
+37.24943
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+7352
+</td>
+<td style="text-align:right;">
+V. Marchetti
+</td>
+<td style="text-align:right;">
+19
+</td>
+<td style="text-align:right;">
+AS Nancy Lorraine
+</td>
+<td style="text-align:right;">
+€1.5M
+</td>
+<td style="text-align:right;">
+37.05049
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1694
+</td>
+<td style="text-align:right;">
+O. Pineda
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Guadalajara
+</td>
+<td style="text-align:right;">
+€10M
+</td>
+<td style="text-align:right;">
+36.95943
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+529
+</td>
+<td style="text-align:right;">
+M. Dahoud
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Borussia Dortmund
+</td>
+<td style="text-align:right;">
+€18.5M
+</td>
+<td style="text-align:right;">
+36.66232
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+4702
+</td>
+<td style="text-align:right;">
+D. Warmerdam
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+FC Groningen
+</td>
+<td style="text-align:right;">
+€3M
+</td>
+<td style="text-align:right;">
+33.67417
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1116
+</td>
+<td style="text-align:right;">
+L. Pellegrini
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Roma
+</td>
+<td style="text-align:right;">
+€13M
+</td>
+<td style="text-align:right;">
+33.38607
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1848
+</td>
+<td style="text-align:right;">
+P. Højbjerg
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Southampton
+</td>
+<td style="text-align:right;">
+€9M
+</td>
+<td style="text-align:right;">
+32.91319
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+94
+</td>
+<td style="text-align:right;">
+Marco Asensio
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Real Madrid CF
+</td>
+<td style="text-align:right;">
+€46M
+</td>
+<td style="text-align:right;">
+31.99815
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+8051
+</td>
+<td style="text-align:right;">
+J. Sambia
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+Montpellier Hérault SC
+</td>
+<td style="text-align:right;">
+€1.1M
+</td>
+<td style="text-align:right;">
+30.68146
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+5177
+</td>
+<td style="text-align:right;">
+K. Laimer
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+RB Leipzig
+</td>
+<td style="text-align:right;">
+€2.8M
+</td>
+<td style="text-align:right;">
+28.35706
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2432
+</td>
+<td style="text-align:right;">
+Merino
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Newcastle United
+</td>
+<td style="text-align:right;">
+€8M
+</td>
+<td style="text-align:right;">
+28.35131
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+6260
+</td>
+<td style="text-align:right;">
+M. Duelund
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+FC Midtjylland
+</td>
+<td style="text-align:right;">
+€1.6M
+</td>
+<td style="text-align:right;">
+28.21756
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+3732
+</td>
+<td style="text-align:right;">
+Y. Ait Bennasser
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+SM Caen
+</td>
+<td style="text-align:right;">
+€5M
+</td>
+<td style="text-align:right;">
+26.45427
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+4915
+</td>
+<td style="text-align:right;">
+O. Kemen
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+GFC Ajaccio
+</td>
+<td style="text-align:right;">
+€3.1M
+</td>
+<td style="text-align:right;">
+26.37328
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2938
+</td>
+<td style="text-align:right;">
+T. Davies
+</td>
+<td style="text-align:right;">
+19
+</td>
+<td style="text-align:right;">
+Everton
+</td>
+<td style="text-align:right;">
+€7M
+</td>
+<td style="text-align:right;">
+25.73374
+</td>
+</tr>
+</tbody>
+</table>
+Nearest Neighbours : Top 25 Position Specific
+---------------------------------------------
+
+In the first version we used all data on the player, including their goalkeeping skills. However, we may want to just look at the relevant attributes of midfielders.
+
+Let's trim the data down and pass the data to the nn2 function again. See annotations below:
+
+``` r
+## keep just the midfielder related attributes
+posSpec <- ComparisonResults[c(8,9,12,13,21,23,24,27,29,33,36)]
+HammerPS <- Hamsik[c(8,9,12,13,21,23,24,27,29,33,36)]
+
+## reset indexes
+rownames(posSpec) <- NULL
+
+## run analaysis 
+nnResults <- nn2(posSpec, HammerPS, k=min(25,nrow(data)),treetype=c("kd","bd"),
+    searchtype=c("standard","priority","radius"),radius=0.0,eps=0.0)
+
+## Convert the results to arrays to use
+PlayerSelection2 <- unlist(t(nnResults$nn.idx))[,1]
+CloseMatch2 <- 100 - unlist(t(nnResults$nn.dists))[,1]
+
+## Create summary data of the Top 25
+FinalResultsPS <- ComparisonResults[PlayerSelection2,]
+FinalResultsPS <- FinalResultsPS[1:4]
+FinalResultsPS$SimilarityScore <- CloseMatch2
+formattable(FinalResultsPS)
+```
+
+<table class="table table-condensed">
+<thead>
+<tr>
+<th style="text-align:left;">
+</th>
+<th style="text-align:right;">
+Name
+</th>
+<th style="text-align:right;">
+Age
+</th>
+<th style="text-align:right;">
+Club
+</th>
+<th style="text-align:right;">
+Value
+</th>
+<th style="text-align:right;">
+SimilarityScore
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+529
+</td>
+<td style="text-align:right;">
+M. Dahoud
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Borussia Dortmund
+</td>
+<td style="text-align:right;">
+€18.5M
+</td>
+<td style="text-align:right;">
+82.38332
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1848
+</td>
+<td style="text-align:right;">
+P. Højbjerg
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Southampton
+</td>
+<td style="text-align:right;">
+€9M
+</td>
+<td style="text-align:right;">
+81.50989
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2934
+</td>
+<td style="text-align:right;">
+S. Schrijvers
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+KRC Genk
+</td>
+<td style="text-align:right;">
+€6M
+</td>
+<td style="text-align:right;">
+79.60824
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2938
+</td>
+<td style="text-align:right;">
+T. Davies
+</td>
+<td style="text-align:right;">
+19
+</td>
+<td style="text-align:right;">
+Everton
+</td>
+<td style="text-align:right;">
+€7M
+</td>
+<td style="text-align:right;">
+78.81730
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+4839
+</td>
+<td style="text-align:right;">
+S. Berge
+</td>
+<td style="text-align:right;">
+19
+</td>
+<td style="text-align:right;">
+KRC Genk
+</td>
+<td style="text-align:right;">
+€3.5M
+</td>
+<td style="text-align:right;">
+76.22223
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1934
+</td>
+<td style="text-align:right;">
+V. Vada
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Girondins de Bordeaux
+</td>
+<td style="text-align:right;">
+€9.5M
+</td>
+<td style="text-align:right;">
+76.21926
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+14015
+</td>
+<td style="text-align:right;">
+M. Cuisance
+</td>
+<td style="text-align:right;">
+17
+</td>
+<td style="text-align:right;">
+Borussia Mönchengladbach
+</td>
+<td style="text-align:right;">
+€550K
+</td>
+<td style="text-align:right;">
+75.87038
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+4736
+</td>
+<td style="text-align:right;">
+C. Nkunku
+</td>
+<td style="text-align:right;">
+19
+</td>
+<td style="text-align:right;">
+Paris Saint-Germain
+</td>
+<td style="text-align:right;">
+€3.9M
+</td>
+<td style="text-align:right;">
+75.51731
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+5407
+</td>
+<td style="text-align:right;">
+S. Lukić
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+Levante UD
+</td>
+<td style="text-align:right;">
+€2.4M
+</td>
+<td style="text-align:right;">
+74.78558
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2522
+</td>
+<td style="text-align:right;">
+Y. Yazıcı
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+Trabzonspor
+</td>
+<td style="text-align:right;">
+€8.5M
+</td>
+<td style="text-align:right;">
+74.77642
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1257
+</td>
+<td style="text-align:right;">
+J. Jankto
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Udinese
+</td>
+<td style="text-align:right;">
+€12M
+</td>
+<td style="text-align:right;">
+73.04143
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+7297
+</td>
+<td style="text-align:right;">
+F. Maouassa
+</td>
+<td style="text-align:right;">
+18
+</td>
+<td style="text-align:right;">
+Stade Rennais FC
+</td>
+<td style="text-align:right;">
+€1.3M
+</td>
+<td style="text-align:right;">
+72.67101
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1414
+</td>
+<td style="text-align:right;">
+A. Golovin
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+CSKA Moscow
+</td>
+<td style="text-align:right;">
+€11.5M
+</td>
+<td style="text-align:right;">
+72.31610
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+3937
+</td>
+<td style="text-align:right;">
+O. Zinchenko
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+Manchester City
+</td>
+<td style="text-align:right;">
+€5M
+</td>
+<td style="text-align:right;">
+71.66624
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+4915
+</td>
+<td style="text-align:right;">
+O. Kemen
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+GFC Ajaccio
+</td>
+<td style="text-align:right;">
+€3.1M
+</td>
+<td style="text-align:right;">
+70.71428
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+954
+</td>
+<td style="text-align:right;">
+N. Amiri
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+TSG 1899 Hoffenheim
+</td>
+<td style="text-align:right;">
+€13M
+</td>
+<td style="text-align:right;">
+69.86275
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+7352
+</td>
+<td style="text-align:right;">
+V. Marchetti
+</td>
+<td style="text-align:right;">
+19
+</td>
+<td style="text-align:right;">
+AS Nancy Lorraine
+</td>
+<td style="text-align:right;">
+€1.5M
+</td>
+<td style="text-align:right;">
+68.17822
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1456
+</td>
+<td style="text-align:right;">
+Thiago Maia
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+LOSC Lille
+</td>
+<td style="text-align:right;">
+€9.5M
+</td>
+<td style="text-align:right;">
+67.51104
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+94
+</td>
+<td style="text-align:right;">
+Marco Asensio
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Real Madrid CF
+</td>
+<td style="text-align:right;">
+€46M
+</td>
+<td style="text-align:right;">
+66.88529
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+4702
+</td>
+<td style="text-align:right;">
+D. Warmerdam
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+FC Groningen
+</td>
+<td style="text-align:right;">
+€3M
+</td>
+<td style="text-align:right;">
+66.11097
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1452
+</td>
+<td style="text-align:right;">
+M. Stendera
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Eintracht Frankfurt
+</td>
+<td style="text-align:right;">
+€12M
+</td>
+<td style="text-align:right;">
+65.51014
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+1694
+</td>
+<td style="text-align:right;">
+O. Pineda
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Guadalajara
+</td>
+<td style="text-align:right;">
+€10M
+</td>
+<td style="text-align:right;">
+64.22199
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2099
+</td>
+<td style="text-align:right;">
+Danilo
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+SC Braga
+</td>
+<td style="text-align:right;">
+€8M
+</td>
+<td style="text-align:right;">
+64.09947
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+3298
+</td>
+<td style="text-align:right;">
+R. Tapia
+</td>
+<td style="text-align:right;">
+21
+</td>
+<td style="text-align:right;">
+Feyenoord
+</td>
+<td style="text-align:right;">
+€4.2M
+</td>
+<td style="text-align:right;">
+63.61413
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+5177
+</td>
+<td style="text-align:right;">
+K. Laimer
+</td>
+<td style="text-align:right;">
+20
+</td>
+<td style="text-align:right;">
+RB Leipzig
+</td>
+<td style="text-align:right;">
+€2.8M
+</td>
+<td style="text-align:right;">
+63.48657
+</td>
+</tr>
+</tbody>
+</table>
+Conclusions
+-----------
+
+Although we are using 'real fake' data, similarity analysis throws up some interesting options for our Head of Recruitment to look into further.
+
+Creating better weights for the data would improve the model considerably. The age curves are also a little rough around the edges and could be improved.
